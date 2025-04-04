@@ -4,6 +4,7 @@ from flask_jwt_extended import create_access_token
 from pymongo import MongoClient
 import os
 from dotenv import load_dotenv
+import certifi
 
 # Load env variables
 load_dotenv()
@@ -11,8 +12,8 @@ load_dotenv()
 auth_bp = Blueprint("auth", __name__)
 
 # MongoDB Connection
-MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://phishuser:securepassword@phisheye.gf9n5.mongodb.net/phishi_eye?retryWrites=true&w=majority&tls=true")
-client = MongoClient(MONGO_URI)
+MONGO_URI = os.getenv("MONGO_URI")
+client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
 db = client["phishi_eye"]
 users_collection = db["users"]
 
