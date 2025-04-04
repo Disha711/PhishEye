@@ -21,7 +21,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # MongoDB Connection
-MONGO_URI = os.getenv("MONGO_URI", "MONGO_URI = "mongodb+srv://phishuser:securepassword@phisheye.gf9n5.mongodb.net/phishi_eye?retryWrites=true&w=majority&tls=true"")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://phishuser:securepassword@phisheye.gf9n5.mongodb.net/phishi_eye?retryWrites=true&w=majority&tls=true")
 client = MongoClient(MONGO_URI)
 db = client["phishi_eye"]
 reports_collection = db["reports"]
