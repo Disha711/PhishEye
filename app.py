@@ -29,7 +29,7 @@ MONGO_URI = os.getenv("MONGO_URI")
 client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
 db = client["phishi_eye"]
 reports_collection = db["reports"]
-urls_collection = db["phishing_urls"]
+urls_collection = db["phishing_urls1"]
 
 # ✅ Configure JWT
 app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "your_secret_key")
@@ -54,6 +54,14 @@ FEATURE_NAMES = [
     'DNSRecord', 'web_traffic', 'Page_Rank', 'Google_Index', 'Links_pointing_to_page',
     'Statistical_report'
 ]
+def save_to_reports(user, url, prediction, confidence):
+    reports_collection.insert_one({
+        "user": user,
+        "url": url,
+        "prediction": prediction,
+        "confidence": confidence,
+        "timestamp": time.time()
+    })
 
 @app.route("/", methods=["GET"])
 def home():
@@ -127,19 +135,42 @@ def get_latest_report():
     try:
         current_user = get_jwt_identity()
 
-        # Fetch the most recent report for the user
+        # ✅ Check if user has a report in their collection
         latest_report = reports_collection.find_one(
             {"user": current_user},
             sort=[("timestamp", -1)]
         )
 
         if not latest_report:
+            # ✅ Fallback: fetch latest from global urls_collection
+            latest_global = urls_collection.find_one(
+                {},
+                sort=[("timestamp", -1)]
+            )
+
+            if latest_global:
+                # ✅ Save this global result to the current user's reports
+                save_to_reports(
+                    user=current_user,
+                    url=latest_global["url"],
+                    prediction=latest_global["prediction"],
+                    confidence=latest_global.get("confidence", 0.5)
+                )
+
+                return jsonify({
+                    "url": latest_global["url"],
+                    "prediction": latest_global["prediction"],
+                    "confidence": latest_global.get("confidence", 0.5),
+                    "message": "Latest global report saved for user"
+                }), 200
+
             return jsonify({"error": "No report found for this user"}), 404
 
+        # ✅ Return user's latest report
         return jsonify({
             "url": latest_report["url"],
             "prediction": latest_report["prediction"],
-            "confidence": latest_report.get("confidence", 0.5)  # Default to 50% if missing
+            "confidence": latest_report.get("confidence", 0.5)
         }), 200
 
     except Exception as e:
