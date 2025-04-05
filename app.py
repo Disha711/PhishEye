@@ -34,10 +34,13 @@ jwt = JWTManager(app)
 # Register auth blueprint
 app.register_blueprint(auth_bp)
 
-# Load model
+# Load model globally (Optimized)
+booster = None
 def load_model():
-    booster = xgb.Booster()
-    booster.load_model("xgboost_model.json")
+    global booster
+    if booster is None:
+        booster = xgb.Booster()
+        booster.load_model("xgboost_model.json")
     return booster
 
 # Features expected
@@ -58,7 +61,7 @@ def save_to_reports(user, url, prediction, confidence):
         "url": url,
         "prediction": prediction,
         "confidence": confidence,
-        "timestamp": time.time()
+        "timestamp": int(time.time())  # Store timestamp as integer
     })
 
 @app.route("/", methods=["GET"])
@@ -103,7 +106,7 @@ def predict():
             "url": url,
             "prediction": result,
             "confidence": round(probability, 4),
-            "timestamp": time.time()
+            "timestamp": int(time.time())
         })
 
         return jsonify({
@@ -115,7 +118,7 @@ def predict():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ✅ Save report for user (called after /predict from frontend)
+# Save report for user (called after /predict from frontend)
 @app.route("/report", methods=["POST"])
 @jwt_required()
 def save_report():
@@ -142,7 +145,7 @@ def save_report():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ✅ Get latest report for logged-in user
+# Get latest report for logged-in user
 @app.route("/report", methods=["GET"])
 @jwt_required()
 def get_latest_report():
@@ -166,7 +169,7 @@ def get_latest_report():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Optional: Clear user report history
+# Clear user report history
 @app.route("/report", methods=["DELETE"])
 @jwt_required()
 def delete_user_report():
