@@ -3,48 +3,44 @@ import xgboost as xgb
 import numpy as np
 from flask import Flask, request, jsonify
 import os
-import re
 import time
-import requests
-from urllib.parse import urlparse
 from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
 from pymongo import MongoClient
 from auth import auth_bp
 from dotenv import load_dotenv
 from feature_extraction import extract_features
 import certifi
-from flask_cors import CORS  # ✅ Import CORS
+from flask_cors import CORS
 
-# ✅ Load environment variables
+# Load environment variables
 load_dotenv()
 
-# ✅ Define Flask app
 app = Flask(__name__)
 
-# ✅ Enable CORS for specific frontend (React) origin
-CORS(app, resources={r"/*": {"origins": "*"}})  # Allow all origins
+# Enable CORS
+CORS(app, resources={r"/*": {"origins": "*"}})
 
-# ✅ MongoDB Connection
+# MongoDB Setup
 MONGO_URI = os.getenv("MONGO_URI")
 client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
 db = client["phishi_eye"]
 reports_collection = db["reports"]
 urls_collection = db["phishing_urls1"]
 
-# ✅ Configure JWT
+# JWT Setup
 app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "your_secret_key")
 jwt = JWTManager(app)
 
-# ✅ Register auth blueprint
+# Register auth blueprint
 app.register_blueprint(auth_bp)
 
-# ✅ Lazy Load XGBoost Model
+# Load model
 def load_model():
     booster = xgb.Booster()
     booster.load_model("xgboost_model.json")
     return booster
 
-# ✅ Feature Names
+# Features expected
 FEATURE_NAMES = [
     'having_IP_Address', 'URL_Length', 'Shortining_Service', 'having_At_Symbol',
     'double_slash_redirecting', 'Prefix_Suffix', 'having_Sub_Domain', 'SSLfinal_State',
@@ -54,6 +50,8 @@ FEATURE_NAMES = [
     'DNSRecord', 'web_traffic', 'Page_Rank', 'Google_Index', 'Links_pointing_to_page',
     'Statistical_report'
 ]
+
+# Save report helper
 def save_to_reports(user, url, prediction, confidence):
     reports_collection.insert_one({
         "user": user,
@@ -67,6 +65,7 @@ def save_to_reports(user, url, prediction, confidence):
 def home():
     return "Phishing Detection API is running!", 200
 
+# Predict endpoint
 @app.route("/predict", methods=["POST"])
 def predict():
     try:
@@ -76,7 +75,7 @@ def predict():
 
         url = data["url"]
 
-        # ✅ Check if URL already exists in DB
+        # Check if URL already exists
         existing_entry = urls_collection.find_one({"url": url})
         if existing_entry:
             return jsonify({
@@ -86,15 +85,12 @@ def predict():
                 "message": "Fetched from database"
             })
 
-        # ✅ Extract features from URL
+        # Extract features
         features = extract_features(url)
         if features is None:
             return jsonify({"error": "Feature extraction failed"}), 500
 
-        # ✅ Create DataFrame
         df_input = pd.DataFrame([features], columns=FEATURE_NAMES)
-
-        # ✅ Load model and predict
         booster = load_model()
         dmatrix = xgb.DMatrix(df_input, feature_names=FEATURE_NAMES)
         prediction = booster.predict(dmatrix)
@@ -102,7 +98,7 @@ def predict():
         probability = float(prediction[0])
         result = "Phishing" if probability > 0.5 else "Legitimate"
 
-        # ✅ Store prediction result in MongoDB
+        # Save globally in URL collection
         urls_collection.insert_one({
             "url": url,
             "prediction": result,
@@ -119,44 +115,48 @@ def predict():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ✅ Save report for user (called after /predict from frontend)
+@app.route("/report", methods=["POST"])
+@jwt_required()
+def save_report():
+    try:
+        current_user = get_jwt_identity()
+        data = request.get_json()
+
+        url = data.get("url")
+        prediction = data.get("prediction")
+        confidence = data.get("confidence", 0.5)
+
+        if not url or not prediction:
+            return jsonify({"error": "Missing required fields"}), 400
+
+        save_to_reports(
+            user=current_user,
+            url=url,
+            prediction=prediction,
+            confidence=confidence
+        )
+
+        return jsonify({"message": "Report saved"}), 201
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ✅ Get latest report for logged-in user
 @app.route("/report", methods=["GET"])
 @jwt_required()
 def get_latest_report():
     try:
         current_user = get_jwt_identity()
 
-        # ✅ Check if user has a report in their collection
         latest_report = reports_collection.find_one(
             {"user": current_user},
             sort=[("timestamp", -1)]
         )
 
         if not latest_report:
-            # ✅ Fallback: fetch latest from global urls_collection
-            latest_global = urls_collection.find_one(
-                {},
-                sort=[("timestamp", -1)]
-            )
-
-            if latest_global:
-                # ✅ Save this global result to the current user's reports
-                save_to_reports(
-                    user=current_user,
-                    url=latest_global["url"],
-                    prediction=latest_global["prediction"],
-                    confidence=latest_global.get("confidence", 0.5)
-                )
-
-                return jsonify({
-                    "url": latest_global["url"],
-                    "prediction": latest_global["prediction"],
-                    "confidence": latest_global.get("confidence", 0.5),
-                    "message": "Latest global report saved for user"
-                }), 200
-
             return jsonify({"error": "No report found for this user"}), 404
 
-        # ✅ Return user's latest report
         return jsonify({
             "url": latest_report["url"],
             "prediction": latest_report["prediction"],
@@ -165,7 +165,8 @@ def get_latest_report():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-        
+
+# Optional: Clear user report history
 @app.route("/report", methods=["DELETE"])
 @jwt_required()
 def delete_user_report():
@@ -175,7 +176,6 @@ def delete_user_report():
         return jsonify({"message": "Report(s) deleted"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 if __name__ == "__main__":
     app.run(debug=True)
