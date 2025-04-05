@@ -119,16 +119,6 @@ def predict():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/history", methods=["GET"])
-@jwt_required()
-def get_history():
-    try:
-        current_user = get_jwt_identity()
-        reports = list(reports_collection.find({"user": current_user}, {"_id": 0}))
-        return jsonify({"history": reports}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
 @app.route("/report", methods=["GET"])
 @jwt_required()
 def get_latest_report():
@@ -175,6 +165,17 @@ def get_latest_report():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+        
+@app.route("/report", methods=["DELETE"])
+@jwt_required()
+def delete_user_report():
+    try:
+        current_user = get_jwt_identity()
+        reports_collection.delete_many({"user": current_user})
+        return jsonify({"message": "Report(s) deleted"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     app.run(debug=True)
