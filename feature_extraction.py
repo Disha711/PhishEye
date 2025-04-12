@@ -1,59 +1,169 @@
-
 import re
+import socket
+import whois
+import requests
 import tldextract
-
-FEATURE_NAMES = [
-    'having_IP_Address', 'URL_Length', 'Shortining_Service', 'having_At_Symbol',
-    'double_slash_redirecting', 'Prefix_Suffix', 'having_Sub_Domain', 'SSLfinal_State',
-    'Domain_registeration_length', 'Favicon', 'port', 'HTTPS_token', 'Request_URL',
-    'URL_of_Anchor', 'Links_in_tags', 'SFH', 'Submitting_to_email', 'Abnormal_URL',
-    'Redirect', 'on_mouseover', 'RightClick', 'popUpWidnow', 'Iframe', 'age_of_domain',
-    'DNSRecord', 'web_traffic', 'Page_Rank', 'Google_Index', 'Links_pointing_to_page',
-    'Statistical_report'
-]
+from datetime import datetime
+from urllib.parse import urlparse
 
 def extract_features(url):
     try:
-        domain_info = tldextract.extract(url)
-        subdomain = domain_info.subdomain
-        domain = domain_info.domain
+        features = []
 
-        shortening_services = ["bit.ly", "goo.gl", "tinyurl", "ow.ly", "t.co", "is.gd", "buff.ly"]
+        # Extract domain info
+        parsed_url = urlparse(url)
+        hostname = parsed_url.netloc
+        ext = tldextract.extract(url)
+        domain = ext.domain + '.' + ext.suffix
+        subdomain = ext.subdomain
 
-        features = {
-            "having_IP_Address": 1 if re.search(r'\d+\.\d+\.\d+\.\d+', url) else 0,
-            "URL_Length": 1 if len(url) < 54 else 2 if len(url) < 75 else 3,
-            "Shortining_Service": 1 if any(service in url for service in shortening_services) else 0,
-            "having_At_Symbol": 1 if "@" in url else 0,
-            "double_slash_redirecting": 1 if re.search(r"https?://.*//", url[8:]) else 0,
-            "Prefix_Suffix": 1 if "-" in domain else 0,
-            "having_Sub_Domain": 1 if subdomain.count('.') <= 1 else 2,
-            "SSLfinal_State": 1 if url.startswith("https") else 0,
-            "Domain_registeration_length": 1,  # Placeholder, to be replaced with real data
-            "Favicon": 1,  # Placeholder
-            "port": 0,  # Placeholder
-            "HTTPS_token": 0,  # Placeholder
-            "Request_URL": 1,  # Placeholder
-            "URL_of_Anchor": 1,  # Placeholder
-            "Links_in_tags": 1,  # Placeholder
-            "SFH": 1,  # Placeholder
-            "Submitting_to_email": 0,  # Placeholder
-            "Abnormal_URL": 0,  # Placeholder
-            "Redirect": 0,  # Placeholder
-            "on_mouseover": 0,  # Placeholder
-            "RightClick": 0,  # Placeholder
-            "popUpWidnow": 0,  # Placeholder
-            "Iframe": 0,  # Placeholder
-            "age_of_domain": 1,  # Placeholder
-            "DNSRecord": 1,  # Placeholder
-            "web_traffic": 1,  # Placeholder
-            "Page_Rank": 1,  # Placeholder
-            "Google_Index": 1,  # Placeholder
-            "Links_pointing_to_page": 1,  # Placeholder
-            "Statistical_report": 1  # Placeholder
-        }
+        # Feature 1: having_IP_Address
+        try:
+            socket.inet_aton(hostname)
+            features.append(1)
+        except:
+            features.append(0)
 
-        return list(features.values())
+        # Feature 2: URL_Length
+        length = len(url)
+        features.append(1 if length < 54 else 2 if length <= 75 else 3)
+
+        # Feature 3: Shortining_Service
+        shortening_services = r"(bit\.ly|goo\.gl|shorte\.st|go2l\.ink|x\.co|ow\.ly|t\.co|tinyurl|tr\.im|is\.gd|cli\.gs|yfrog\.com|migre\.me|ff\.im|tiny\.cc)"
+        features.append(1 if re.search(shortening_services, url) else 0)
+
+        # Feature 4: having_At_Symbol
+        features.append(1 if "@" in url else 0)
+
+        # Feature 5: double_slash_redirecting
+        features.append(1 if "//" in url[7:] else 0)
+
+        # Feature 6: Prefix_Suffix
+        features.append(1 if "-" in hostname else 0)
+
+        # Feature 7: having_Sub_Domain
+        dot_count = subdomain.count(".")
+        features.append(1 if dot_count <= 1 else 2)
+
+        # Feature 8: SSLfinal_State
+        features.append(1 if url.startswith("https") else 0)
+
+        # Feature 9: Domain_registeration_length
+        try:
+            w = whois.whois(domain)
+            if w.expiration_date and w.creation_date:
+                exp = w.expiration_date if isinstance(w.expiration_date, datetime) else w.expiration_date[0]
+                cre = w.creation_date if isinstance(w.creation_date, datetime) else w.creation_date[0]
+                age = (exp - cre).days
+                features.append(1 if age > 365 else 0)
+            else:
+                features.append(0)
+        except:
+            features.append(0)
+
+        # Feature 10: Favicon
+        features.append(1 if domain in url else 0)
+
+        # Feature 11: port
+        features.append(1 if ':' in hostname else 0)
+
+        # Feature 12: HTTPS_token
+        features.append(1 if 'https' in domain else 0)
+
+        # Request-based features (require page fetch)
+        try:
+            response = requests.get(url, timeout=5)
+            content = response.text
+        except:
+            content = ''
+
+        # Feature 13: Request_URL
+        features.append(1 if domain in content else 0)
+
+        # Feature 14: URL_of_Anchor
+        anchor_tags = re.findall(r'<a\s+(?:[^>]*?\s+)?href="([^"]*)"', content)
+        null_links = [link for link in anchor_tags if link.startswith('#') or not link.startswith('http')]
+        percent = len(null_links) / len(anchor_tags) if anchor_tags else 0
+        features.append(1 if percent < 0.31 else 0)
+
+        # Feature 15: Links_in_tags
+        meta_links = re.findall(r'<meta[^>]+content="[^"]*http[^"]*"', content)
+        script_links = re.findall(r'<script[^>]+src="http[^"]*"', content)
+        percent = len(meta_links + script_links) / (len(anchor_tags) + 1)
+        features.append(1 if percent < 0.25 else 0)
+
+        # Feature 16: SFH
+        sfh_match = re.search(r'<form[^>]+action="([^"]*)"', content)
+        if sfh_match:
+            form_action = sfh_match.group(1)
+            if form_action == "" or form_action == "about:blank":
+                features.append(1)
+            elif domain not in form_action:
+                features.append(1)
+            else:
+                features.append(0)
+        else:
+            features.append(0)
+
+        # Feature 17: Submitting_to_email
+        features.append(1 if "mailto:" in content else 0)
+
+        # Feature 18: Abnormal_URL
+        try:
+            whois_domain = whois.whois(domain).domain_name
+            features.append(0 if whois_domain else 1)
+        except:
+            features.append(1)
+
+        # Feature 19: Redirect
+        features.append(1 if len(response.history) >= 2 else 0)
+
+        # Feature 20: on_mouseover
+        features.append(1 if "onmouseover" in content else 0)
+
+        # Feature 21: RightClick
+        features.append(1 if "event.button==2" in content else 0)
+
+        # Feature 22: popUpWidnow
+        features.append(1 if "alert(" in content else 0)
+
+        # Feature 23: Iframe
+        features.append(1 if "<iframe" in content else 0)
+
+        # Feature 24: age_of_domain
+        try:
+            creation = whois.whois(domain).creation_date
+            if isinstance(creation, list):
+                creation = creation[0]
+            age = (datetime.now() - creation).days if creation else 0
+            features.append(1 if age > 180 else 0)
+        except:
+            features.append(0)
+
+        # Feature 25: DNSRecord
+        try:
+            whois.whois(domain)
+            features.append(1)
+        except:
+            features.append(0)
+
+        # Feature 26: web_traffic (you can replace this with real Alexa/SimilarWeb API later)
+        features.append(1)  # Assume legit for now
+
+        # Feature 27: Page_Rank (can be improved)
+        features.append(1)  # Assume legit
+
+        # Feature 28: Google_Index
+        features.append(1)  # Assume indexed
+
+        # Feature 29: Links_pointing_to_page
+        features.append(1)  # Assume not suspicious
+
+        # Feature 30: Statistical_report
+        features.append(1)  # Assume not in blacklist
+
+        return features
+
     except Exception as e:
-        print(f"Error extracting features: {e}")
-        return [0]*len(FEATURE_NAMES)
+        print("Feature extraction error:", e)
+        return [0] * 31
