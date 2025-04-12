@@ -121,36 +121,26 @@ def get_history():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/report", methods=["POST"])
+@app.route("/report", methods=["GET"])
 @jwt_required()
-def report():
+def get_latest_report():
     try:
-        data = request.get_json()
-        if "url" not in data:
-            return jsonify({"error": "Missing 'url' field in request"}), 400
-
-        url = data["url"]
-
-        # ✅ Check if URL exists in DB
-        existing_entry = urls_collection.find_one({"url": url})
-        if existing_entry:
-            result = existing_entry["prediction"]
-        else:
-            features = extract_features(url)
-            if features is None:
-                return jsonify({"error": "Feature extraction failed"}), 500
-
-            df_input = pd.DataFrame([features], columns=FEATURE_NAMES)
-            dmatrix = xgb.DMatrix(df_input, feature_names=FEATURE_NAMES)
-
-            booster = load_model()
-            prediction = booster.predict(dmatrix)
-            result = "Phishing" if prediction[0] > 0.5 else "Legitimate"
-
         current_user = get_jwt_identity()
-        reports_collection.insert_one({"user": current_user, "url": url, "prediction": result, "timestamp": time.time()})
 
-        return jsonify({"message": "Report saved successfully", "url": url, "prediction": result})
+        # Fetch the most recent report for the user
+        latest_report = reports_collection.find_one(
+            {"user": current_user},
+            sort=[("timestamp", -1)]
+        )
+
+        if not latest_report:
+            return jsonify({"error": "No report found for this user"}), 404
+
+        return jsonify({
+            "url": latest_report["url"],
+            "prediction": latest_report["prediction"],
+            "confidence": latest_report.get("confidence", 0.5)  # Default to 50% if missing
+        }), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
