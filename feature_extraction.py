@@ -1,169 +1,146 @@
 import re
-import socket
-import whois
-import requests
 import tldextract
-from datetime import datetime
+import socket
+import requests
 from urllib.parse import urlparse
+
+FEATURE_NAMES = [
+    'having_IP_Address', 'URL_Length', 'Shortining_Service', 'having_At_Symbol',
+    'double_slash_redirecting', 'Prefix_Suffix', 'having_Sub_Domain', 'SSLfinal_State',
+    'Domain_registeration_length', 'Favicon', 'port', 'HTTPS_token', 'Request_URL',
+    'URL_of_Anchor', 'Links_in_tags', 'SFH', 'Submitting_to_email', 'Abnormal_URL',
+    'Redirect', 'on_mouseover', 'RightClick', 'popUpWidnow', 'Iframe', 'age_of_domain',
+    'DNSRecord', 'web_traffic', 'Page_Rank', 'Google_Index', 'Links_pointing_to_page',
+    'Statistical_report'
+]
 
 def extract_features(url):
     try:
-        features = []
+        domain_info = tldextract.extract(url)
+        subdomain = domain_info.subdomain
+        domain = domain_info.domain
 
-        # Extract domain info
-        parsed_url = urlparse(url)
-        hostname = parsed_url.netloc
-        ext = tldextract.extract(url)
-        domain = ext.domain + '.' + ext.suffix
-        subdomain = ext.subdomain
+        shortening_services = ["bit.ly", "goo.gl", "tinyurl", "ow.ly", "t.co", "is.gd", "buff.ly"]
+        
+        # Extracting features
+        features = {
+            "having_IP_Address": 1 if re.search(r'\d+\.\d+\.\d+\.\d+', url) else 0,
+            "URL_Length": len(url),
+            "Shortining_Service": 1 if any(service in url for service in shortening_services) else 0,
+            "having_At_Symbol": 1 if "@" in url else 0,
+            "double_slash_redirecting": 1 if url[7:].count("//") > 0 else 0,
+            "Prefix_Suffix": 1 if "-" in domain else 0,
+            "having_Sub_Domain": len(subdomain.split(".")) if subdomain else 0,
+            "SSLfinal_State": 1 if url.startswith("https") else 0,
+            "Domain_registeration_length": get_domain_registration_length(domain),
+            "Favicon": 1 if check_favicon(url) else 0,
+            "port": extract_port(url),
+            "HTTPS_token": 1 if "https" in domain else 0,
+            "Request_URL": extract_request_url(url),
+            "URL_of_Anchor": extract_anchor_url(url),
+            "Links_in_tags": count_links_in_tags(url),
+            "SFH": extract_sfh(url),
+            "Submitting_to_email": 1 if "mailto:" in url else 0,
+            "Abnormal_URL": 1 if check_abnormal_url(url) else 0,
+            "Redirect": check_redirect(url),
+            "on_mouseover": check_on_mouseover(url),
+            "RightClick": check_right_click(url),
+            "popUpWidnow": check_pop_up_window(url),
+            "Iframe": check_iframe(url),
+            "age_of_domain": get_domain_age(domain),
+            "DNSRecord": check_dns_record(domain),
+            "web_traffic": estimate_traffic(domain),
+            "Page_Rank": get_page_rank(domain),
+            "Google_Index": check_google_index(domain),
+            "Links_pointing_to_page": count_links_pointing_to_page(url),
+            "Statistical_report": get_statistical_report(url)
+        }
 
-        # Feature 1: having_IP_Address
-        try:
-            socket.inet_aton(hostname)
-            features.append(1)
-        except:
-            features.append(0)
-
-        # Feature 2: URL_Length
-        length = len(url)
-        features.append(1 if length < 54 else 2 if length <= 75 else 3)
-
-        # Feature 3: Shortining_Service
-        shortening_services = r"(bit\.ly|goo\.gl|shorte\.st|go2l\.ink|x\.co|ow\.ly|t\.co|tinyurl|tr\.im|is\.gd|cli\.gs|yfrog\.com|migre\.me|ff\.im|tiny\.cc)"
-        features.append(1 if re.search(shortening_services, url) else 0)
-
-        # Feature 4: having_At_Symbol
-        features.append(1 if "@" in url else 0)
-
-        # Feature 5: double_slash_redirecting
-        features.append(1 if "//" in url[7:] else 0)
-
-        # Feature 6: Prefix_Suffix
-        features.append(1 if "-" in hostname else 0)
-
-        # Feature 7: having_Sub_Domain
-        dot_count = subdomain.count(".")
-        features.append(1 if dot_count <= 1 else 2)
-
-        # Feature 8: SSLfinal_State
-        features.append(1 if url.startswith("https") else 0)
-
-        # Feature 9: Domain_registeration_length
-        try:
-            w = whois.whois(domain)
-            if w.expiration_date and w.creation_date:
-                exp = w.expiration_date if isinstance(w.expiration_date, datetime) else w.expiration_date[0]
-                cre = w.creation_date if isinstance(w.creation_date, datetime) else w.creation_date[0]
-                age = (exp - cre).days
-                features.append(1 if age > 365 else 0)
-            else:
-                features.append(0)
-        except:
-            features.append(0)
-
-        # Feature 10: Favicon
-        features.append(1 if domain in url else 0)
-
-        # Feature 11: port
-        features.append(1 if ':' in hostname else 0)
-
-        # Feature 12: HTTPS_token
-        features.append(1 if 'https' in domain else 0)
-
-        # Request-based features (require page fetch)
-        try:
-            response = requests.get(url, timeout=5)
-            content = response.text
-        except:
-            content = ''
-
-        # Feature 13: Request_URL
-        features.append(1 if domain in content else 0)
-
-        # Feature 14: URL_of_Anchor
-        anchor_tags = re.findall(r'<a\s+(?:[^>]*?\s+)?href="([^"]*)"', content)
-        null_links = [link for link in anchor_tags if link.startswith('#') or not link.startswith('http')]
-        percent = len(null_links) / len(anchor_tags) if anchor_tags else 0
-        features.append(1 if percent < 0.31 else 0)
-
-        # Feature 15: Links_in_tags
-        meta_links = re.findall(r'<meta[^>]+content="[^"]*http[^"]*"', content)
-        script_links = re.findall(r'<script[^>]+src="http[^"]*"', content)
-        percent = len(meta_links + script_links) / (len(anchor_tags) + 1)
-        features.append(1 if percent < 0.25 else 0)
-
-        # Feature 16: SFH
-        sfh_match = re.search(r'<form[^>]+action="([^"]*)"', content)
-        if sfh_match:
-            form_action = sfh_match.group(1)
-            if form_action == "" or form_action == "about:blank":
-                features.append(1)
-            elif domain not in form_action:
-                features.append(1)
-            else:
-                features.append(0)
-        else:
-            features.append(0)
-
-        # Feature 17: Submitting_to_email
-        features.append(1 if "mailto:" in content else 0)
-
-        # Feature 18: Abnormal_URL
-        try:
-            whois_domain = whois.whois(domain).domain_name
-            features.append(0 if whois_domain else 1)
-        except:
-            features.append(1)
-
-        # Feature 19: Redirect
-        features.append(1 if len(response.history) >= 2 else 0)
-
-        # Feature 20: on_mouseover
-        features.append(1 if "onmouseover" in content else 0)
-
-        # Feature 21: RightClick
-        features.append(1 if "event.button==2" in content else 0)
-
-        # Feature 22: popUpWidnow
-        features.append(1 if "alert(" in content else 0)
-
-        # Feature 23: Iframe
-        features.append(1 if "<iframe" in content else 0)
-
-        # Feature 24: age_of_domain
-        try:
-            creation = whois.whois(domain).creation_date
-            if isinstance(creation, list):
-                creation = creation[0]
-            age = (datetime.now() - creation).days if creation else 0
-            features.append(1 if age > 180 else 0)
-        except:
-            features.append(0)
-
-        # Feature 25: DNSRecord
-        try:
-            whois.whois(domain)
-            features.append(1)
-        except:
-            features.append(0)
-
-        # Feature 26: web_traffic (you can replace this with real Alexa/SimilarWeb API later)
-        features.append(1)  # Assume legit for now
-
-        # Feature 27: Page_Rank (can be improved)
-        features.append(1)  # Assume legit
-
-        # Feature 28: Google_Index
-        features.append(1)  # Assume indexed
-
-        # Feature 29: Links_pointing_to_page
-        features.append(1)  # Assume not suspicious
-
-        # Feature 30: Statistical_report
-        features.append(1)  # Assume not in blacklist
-
-        return features
+        return [features[feature] for feature in FEATURE_NAMES]
 
     except Exception as e:
-        print("Feature extraction error:", e)
-        return [0] * 31
+        print(f"Feature extraction failed: {e}")
+        return None
+
+def get_domain_registration_length(domain):
+    # Placeholder for actual logic (e.g., WHOIS query)
+    return 1  # Placeholder value
+
+def check_favicon(url):
+    try:
+        response = requests.get(url + "/favicon.ico")
+        return response.status_code == 200
+    except requests.exceptions.RequestException:
+        return False
+
+def extract_port(url):
+    parsed_url = urlparse(url)
+    return parsed_url.port if parsed_url.port else 0
+
+def extract_request_url(url):
+    # Placeholder logic
+    return 1  # Placeholder value
+
+def extract_anchor_url(url):
+    # Placeholder logic
+    return 1  # Placeholder value
+
+def count_links_in_tags(url):
+    # Placeholder logic
+    return 1  # Placeholder value
+
+def extract_sfh(url):
+    # Placeholder logic
+    return 1  # Placeholder value
+
+def check_abnormal_url(url):
+    # Placeholder logic
+    return False  # Placeholder value
+
+def check_redirect(url):
+    # Placeholder logic
+    return False  # Placeholder value
+
+def check_on_mouseover(url):
+    # Placeholder logic
+    return True  # Placeholder value
+
+def check_right_click(url):
+    # Placeholder logic
+    return True  # Placeholder value
+
+def check_pop_up_window(url):
+    # Placeholder logic
+    return True  # Placeholder value
+
+def check_iframe(url):
+    # Placeholder logic
+    return True  # Placeholder value
+
+def get_domain_age(domain):
+    # Placeholder logic
+    return 1  # Placeholder value
+
+def check_dns_record(domain):
+    # Placeholder logic
+    return True  # Placeholder value
+
+def estimate_traffic(domain):
+    # Placeholder logic
+    return 1  # Placeholder value
+
+def get_page_rank(domain):
+    # Placeholder logic
+    return 1  # Placeholder value
+
+def check_google_index(domain):
+    # Placeholder logic
+    return True  # Placeholder value
+
+def count_links_pointing_to_page(url):
+    # Placeholder logic
+    return 1  # Placeholder value
+
+def get_statistical_report(url):
+    # Placeholder logic
+    return 1  # Placeholder value
